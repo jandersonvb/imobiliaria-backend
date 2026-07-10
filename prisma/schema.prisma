@@ -120,12 +120,25 @@ model Property {
   isFeatured       Boolean         @default(false)
   agency           Agency          @relation(fields: [agencyId], references: [id], onDelete: Cascade)
   leads            Lead[]
+  images           PropertyImage[]
   createdAt        DateTime        @default(now())
   updatedAt        DateTime        @updatedAt
 
   @@unique([agencyId, code])
   @@index([city, state])
   @@index([purpose, type, status])
+}
+
+model PropertyImage {
+  id         String   @id @default(cuid())
+  propertyId String
+  url        String
+  sortOrder  Int      @default(0)
+  isCover    Boolean  @default(false)
+  property   Property @relation(fields: [propertyId], references: [id], onDelete: Cascade)
+  createdAt  DateTime @default(now())
+
+  @@index([propertyId, sortOrder])
 }
 
 model Lead {
@@ -137,6 +150,7 @@ model Lead {
   email      String?
   phone      String?
   message    String?
+  notes      String?
   stage      LeadStage @default(NEW)
   agency     Agency    @relation(fields: [agencyId], references: [id], onDelete: Cascade)
   property   Property? @relation(fields: [propertyId], references: [id], onDelete: SetNull)
