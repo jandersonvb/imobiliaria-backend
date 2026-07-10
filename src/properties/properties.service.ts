@@ -1,5 +1,6 @@
 import { ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
 import { Prisma, PropertyPurpose, PropertyType } from '@prisma/client';
+import { CloudinaryService } from '../cloudinary/cloudinary.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { AddPropertyImageDto } from './dto/add-property-image.dto';
 import { CreatePropertyDto } from './dto/create-property.dto';
@@ -15,7 +16,10 @@ export type PropertyFilters = {
 
 @Injectable()
 export class PropertiesService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly cloudinary: CloudinaryService,
+  ) {}
 
   findAll(filters: PropertyFilters) {
     const where: Prisma.PropertyWhereInput = {
@@ -49,12 +53,11 @@ export class PropertiesService {
 
   async create(userId: string, dto: CreatePropertyDto) {
     await this.assertMembership(userId, dto.agencyId);
-    const slugBase = this.slugify(`${dto.title}-${dto.code}`);
     return this.prisma.property.create({
       data: {
         agencyId: dto.agencyId,
         code: dto.code.trim(),
-        slug: slugBase,
+        slug: this.slugify(`${dto.title}-${dto.code}`),
         title: dto.title.trim(),
         description: dto.description.trim(),
         purpose: dto.purpose,
@@ -103,6 +106,7 @@ export class PropertiesService {
     if (!property) throw new NotFoundException('Imóvel não encontrado');
     await this.assertMembership(userId, property.agencyId);
     const slug = dto.title || dto.code ? this.slugify(`${dto.title ?? property.title}-${dto.code ?? property.code}`) : undefined;
+
     return this.prisma.property.update({
       where: { id },
       data: {
@@ -115,6 +119,34 @@ export class PropertiesService {
       },
       include: { agency: true, images: { orderBy: { sortOrder: 'asc' } } },
     });
+  }
+
+  async uploadImage(userId: string, propertyId: string, file: Express.Multer.File) {
+    const property = await this.prisma.property.findUnique({
+      where: { id: propertyId },
+      include: { _count: { select: { images: true } } },
+    });
+    if (!property) throw new NotFoundException('Imóvel não encontrado');
+    await this.assertMembership(userId, property.agencyId);
+
+    const upload = await this.cloudinary.uploadImage(file, `imobconnect/properties/${propertyId}`);
+    const isCover = property._count.images === 0;
+
+    const image = await this.prisma.propertyImage.create({
+      data: {
+        propertyId,
+        url: upload.secure_url,
+        publicId: upload.public_id,
+        sortOrder: property._count.images,
+        isCover,
+      },
+    });
+
+    if (isCover || !property.coverImageUrl) {
+      await this.prisma.property.update({ where: { id: propertyId }, data: { coverImageUrl: image.url } });
+    }
+
+    return image;
   }
 
   async addImage(userId: string, propertyId: string, dto: AddPropertyImageDto) {
@@ -140,6 +172,8 @@ export class PropertiesService {
     const image = await this.prisma.propertyImage.findUnique({ where: { id: imageId }, include: { property: true } });
     if (!image || image.propertyId !== propertyId) throw new NotFoundException('Imagem não encontrada');
     await this.assertMembership(userId, image.property.agencyId);
+
+    if (image.publicId) await this.cloudinary.deleteImage(image.publicId);
     await this.prisma.propertyImage.delete({ where: { id: imageId } });
 
     if (image.isCover || image.property.coverImageUrl === image.url) {
