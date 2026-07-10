@@ -1,5 +1,20 @@
-import { Body, Controller, Delete, Get, Param, Patch, Post, Query, UseGuards } from '@nestjs/common';
+import {
+  BadRequestException,
+  Body,
+  Controller,
+  Delete,
+  Get,
+  Param,
+  Patch,
+  Post,
+  Query,
+  UploadedFile,
+  UseGuards,
+  UseInterceptors,
+} from '@nestjs/common';
+import { FileInterceptor } from '@nestjs/platform-express';
 import { PropertyPurpose, PropertyType } from '@prisma/client';
+import { memoryStorage } from 'multer';
 import { CurrentUser } from '../auth/current-user.decorator';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { AddPropertyImageDto } from './dto/add-property-image.dto';
@@ -44,6 +59,28 @@ export class PropertiesController {
   @UseGuards(JwtAuthGuard)
   update(@CurrentUser() user: { sub: string }, @Param('id') id: string, @Body() dto: UpdatePropertyDto) {
     return this.propertiesService.update(user.sub, id, dto);
+  }
+
+  @Post(':id/images/upload')
+  @UseGuards(JwtAuthGuard)
+  @UseInterceptors(FileInterceptor('file', {
+    storage: memoryStorage(),
+    limits: { fileSize: 10 * 1024 * 1024 },
+    fileFilter: (_request, file, callback) => {
+      if (!file.mimetype.startsWith('image/')) {
+        callback(new BadRequestException('Envie apenas arquivos de imagem'), false);
+        return;
+      }
+      callback(null, true);
+    },
+  }))
+  uploadImage(
+    @CurrentUser() user: { sub: string },
+    @Param('id') id: string,
+    @UploadedFile() file?: Express.Multer.File,
+  ) {
+    if (!file) throw new BadRequestException('Selecione uma imagem');
+    return this.propertiesService.uploadImage(user.sub, id, file);
   }
 
   @Post(':id/images')
