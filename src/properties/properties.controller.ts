@@ -1,7 +1,8 @@
-import { Body, Controller, Get, Param, Patch, Post, Query, UseGuards } from '@nestjs/common';
+import { Body, Controller, Delete, Get, Param, Patch, Post, Query, UseGuards } from '@nestjs/common';
 import { PropertyPurpose, PropertyType } from '@prisma/client';
 import { CurrentUser } from '../auth/current-user.decorator';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
+import { AddPropertyImageDto } from './dto/add-property-image.dto';
 import { CreatePropertyDto } from './dto/create-property.dto';
 import { UpdatePropertyDto } from './dto/update-property.dto';
 import { PropertiesService } from './properties.service';
@@ -18,13 +19,7 @@ export class PropertiesController {
     @Query('type') type?: PropertyType,
     @Query('featured') featured?: string,
   ) {
-    return this.propertiesService.findAll({
-      city,
-      state,
-      purpose,
-      type,
-      featured: featured === undefined ? undefined : featured === 'true',
-    });
+    return this.propertiesService.findAll({ city, state, purpose, type, featured: featured === undefined ? undefined : featured === 'true' });
   }
 
   @Get('mine')
@@ -47,12 +42,24 @@ export class PropertiesController {
 
   @Patch(':id')
   @UseGuards(JwtAuthGuard)
-  update(
+  update(@CurrentUser() user: { sub: string }, @Param('id') id: string, @Body() dto: UpdatePropertyDto) {
+    return this.propertiesService.update(user.sub, id, dto);
+  }
+
+  @Post(':id/images')
+  @UseGuards(JwtAuthGuard)
+  addImage(@CurrentUser() user: { sub: string }, @Param('id') id: string, @Body() dto: AddPropertyImageDto) {
+    return this.propertiesService.addImage(user.sub, id, dto);
+  }
+
+  @Delete(':id/images/:imageId')
+  @UseGuards(JwtAuthGuard)
+  removeImage(
     @CurrentUser() user: { sub: string },
     @Param('id') id: string,
-    @Body() dto: UpdatePropertyDto,
+    @Param('imageId') imageId: string,
   ) {
-    return this.propertiesService.update(user.sub, id, dto);
+    return this.propertiesService.removeImage(user.sub, id, imageId);
   }
 
   @Get(':slug')
