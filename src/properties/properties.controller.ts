@@ -1,8 +1,9 @@
-import { Body, Controller, Get, Param, Post, Query, UseGuards } from '@nestjs/common';
+import { Body, Controller, Get, Param, Patch, Post, Query, UseGuards } from '@nestjs/common';
 import { PropertyPurpose, PropertyType } from '@prisma/client';
 import { CurrentUser } from '../auth/current-user.decorator';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { CreatePropertyDto } from './dto/create-property.dto';
+import { UpdatePropertyDto } from './dto/update-property.dto';
 import { PropertiesService } from './properties.service';
 
 @Controller('properties')
@@ -32,13 +33,26 @@ export class PropertiesController {
     return this.propertiesService.findMine(user.sub);
   }
 
+  @Get('mine/:id')
+  @UseGuards(JwtAuthGuard)
+  findMineById(@CurrentUser() user: { sub: string }, @Param('id') id: string) {
+    return this.propertiesService.findMineById(user.sub, id);
+  }
+
   @Post()
   @UseGuards(JwtAuthGuard)
-  create(
-    @CurrentUser() user: { sub: string },
-    @Body() dto: CreatePropertyDto,
-  ) {
+  create(@CurrentUser() user: { sub: string }, @Body() dto: CreatePropertyDto) {
     return this.propertiesService.create(user.sub, dto);
+  }
+
+  @Patch(':id')
+  @UseGuards(JwtAuthGuard)
+  update(
+    @CurrentUser() user: { sub: string },
+    @Param('id') id: string,
+    @Body() dto: UpdatePropertyDto,
+  ) {
+    return this.propertiesService.update(user.sub, id, dto);
   }
 
   @Get(':slug')
