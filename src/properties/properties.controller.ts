@@ -1,5 +1,8 @@
-import { Controller, Get, Param, Query } from '@nestjs/common';
+import { Body, Controller, Get, Param, Post, Query, UseGuards } from '@nestjs/common';
 import { PropertyPurpose, PropertyType } from '@prisma/client';
+import { CurrentUser } from '../auth/current-user.decorator';
+import { JwtAuthGuard } from '../auth/jwt-auth.guard';
+import { CreatePropertyDto } from './dto/create-property.dto';
 import { PropertiesService } from './properties.service';
 
 @Controller('properties')
@@ -21,6 +24,21 @@ export class PropertiesController {
       type,
       featured: featured === undefined ? undefined : featured === 'true',
     });
+  }
+
+  @Get('mine')
+  @UseGuards(JwtAuthGuard)
+  findMine(@CurrentUser() user: { sub: string }) {
+    return this.propertiesService.findMine(user.sub);
+  }
+
+  @Post()
+  @UseGuards(JwtAuthGuard)
+  create(
+    @CurrentUser() user: { sub: string },
+    @Body() dto: CreatePropertyDto,
+  ) {
+    return this.propertiesService.create(user.sub, dto);
   }
 
   @Get(':slug')
