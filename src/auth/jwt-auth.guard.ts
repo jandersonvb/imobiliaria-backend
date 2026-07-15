@@ -21,7 +21,7 @@ export class JwtAuthGuard implements CanActivate {
     if (!token) throw new UnauthorizedException('Token de acesso não informado');
 
     try {
-      request.user = await this.jwtService.verifyAsync(token, {
+      request.user = await this.jwtService.verifyAsync<{ sub: string; email: string }>(token, {
         secret: this.configService.get<string>('JWT_SECRET', 'change-this-secret'),
       });
       return true;
