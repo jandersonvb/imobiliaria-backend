@@ -22,7 +22,7 @@ export class JwtAuthGuard implements CanActivate {
 
     try {
       request.user = await this.jwtService.verifyAsync<{ sub: string; email: string }>(token, {
-        secret: this.configService.get<string>('JWT_SECRET', 'change-this-secret'),
+        secret: this.configService.getOrThrow<string>('JWT_SECRET'),
       });
       return true;
     } catch {

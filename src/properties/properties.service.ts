@@ -1,4 +1,4 @@
-import { ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
+import { ConflictException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
 import { Prisma, PropertyPurpose, PropertyType } from '@prisma/client';
 import { CloudinaryService } from '../cloudinary/cloudinary.service';
 import { PrismaService } from '../prisma/prisma.service';
@@ -12,6 +12,12 @@ export type PropertyFilters = {
   purpose?: PropertyPurpose;
   type?: PropertyType;
   featured?: boolean;
+  q?: string;
+  neighborhood?: string;
+  minPrice?: string;
+  maxPrice?: string;
+  page?: string;
+  limit?: string;
 };
 
 @Injectable()
@@ -21,25 +27,64 @@ export class PropertiesService {
     private readonly cloudinary: CloudinaryService,
   ) {}
 
-  findAll(filters: PropertyFilters) {
+  async findAll(filters: PropertyFilters) {
+    const page = this.positiveInteger(filters.page, 1);
+    const limit = Math.min(this.positiveInteger(filters.limit, 12), 50);
+    const minPrice = this.nonNegativeNumber(filters.minPrice);
+    const maxPrice = this.nonNegativeNumber(filters.maxPrice);
+    const priceFilter = {
+      gte: minPrice,
+      lte: maxPrice,
+    };
+    const hasPriceFilter = minPrice !== undefined || maxPrice !== undefined;
+    const priceWhere: Prisma.PropertyWhereInput | undefined = hasPriceFilter
+      ? filters.purpose === 'SALE'
+        ? { salePrice: priceFilter }
+        : filters.purpose === 'RENT'
+          ? { rentPrice: priceFilter }
+          : { OR: [{ salePrice: priceFilter }, { rentPrice: priceFilter }] }
+      : undefined;
+    const q = filters.q?.trim();
     const where: Prisma.PropertyWhereInput = {
       status: 'AVAILABLE',
       city: filters.city ? { contains: filters.city, mode: 'insensitive' } : undefined,
+      neighborhood: filters.neighborhood ? { contains: filters.neighborhood, mode: 'insensitive' } : undefined,
       state: filters.state?.toUpperCase(),
       purpose: filters.purpose,
       type: filters.type,
       isFeatured: filters.featured,
+      AND: [
+        ...(priceWhere ? [priceWhere] : []),
+        ...(q
+          ? [{ OR: [
+            { title: { contains: q, mode: 'insensitive' as const } },
+            { description: { contains: q, mode: 'insensitive' as const } },
+            { code: { contains: q, mode: 'insensitive' as const } },
+            { city: { contains: q, mode: 'insensitive' as const } },
+            { neighborhood: { contains: q, mode: 'insensitive' as const } },
+          ] }]
+          : []),
+      ],
     };
 
-    return this.prisma.property.findMany({
-      where,
-      include: {
-        agency: { select: { id: true, name: true, slug: true, creci: true, phone: true, email: true } },
-        images: { orderBy: { sortOrder: 'asc' } },
-      },
-      orderBy: [{ isFeatured: 'desc' }, { createdAt: 'desc' }],
-      take: 30,
-    });
+    const [items, total] = await this.prisma.$transaction([
+      this.prisma.property.findMany({
+        where,
+        include: {
+          agency: { select: { id: true, name: true, slug: true, creci: true, phone: true, email: true } },
+          images: { orderBy: { sortOrder: 'asc' } },
+        },
+        orderBy: [{ isFeatured: 'desc' }, { createdAt: 'desc' }],
+        skip: (page - 1) * limit,
+        take: limit,
+      }),
+      this.prisma.property.count({ where }),
+    ]);
+
+    return {
+      items,
+      pagination: { page, limit, total, totalPages: Math.ceil(total / limit) },
+    };
   }
 
   async findBySlug(slug: string) {
@@ -53,8 +98,9 @@ export class PropertiesService {
 
   async create(userId: string, dto: CreatePropertyDto) {
     await this.assertMembership(userId, dto.agencyId);
-    return this.prisma.property.create({
-      data: {
+    try {
+      return await this.prisma.property.create({
+        data: {
         agencyId: dto.agencyId,
         code: dto.code.trim(),
         slug: this.slugify(`${dto.title}-${dto.code}`),
@@ -74,9 +120,15 @@ export class PropertiesService {
         state: dto.state.trim().toUpperCase(),
         coverImageUrl: dto.coverImageUrl?.trim(),
         isFeatured: dto.isFeatured ?? false,
-      },
-      include: { agency: true, images: true },
-    });
+        },
+        include: { agency: true, images: true },
+      });
+    } catch (error) {
+      if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002') {
+        throw new ConflictException('Já existe um imóvel com este código ou endereço público');
+      }
+      throw error;
+    }
   }
 
   findMine(userId: string) {
@@ -107,18 +159,25 @@ export class PropertiesService {
     await this.assertMembership(userId, property.agencyId);
     const slug = dto.title || dto.code ? this.slugify(`${dto.title ?? property.title}-${dto.code ?? property.code}`) : undefined;
 
-    return this.prisma.property.update({
-      where: { id },
-      data: {
+    try {
+      return await this.prisma.property.update({
+        where: { id },
+        data: {
         code: dto.code?.trim(), slug, title: dto.title?.trim(), description: dto.description?.trim(),
         purpose: dto.purpose, type: dto.type, status: dto.status,
         salePrice: dto.salePrice, rentPrice: dto.rentPrice, bedrooms: dto.bedrooms,
         bathrooms: dto.bathrooms, parkingSpaces: dto.parkingSpaces, totalArea: dto.totalArea,
         neighborhood: dto.neighborhood?.trim(), city: dto.city?.trim(), state: dto.state?.trim().toUpperCase(),
         coverImageUrl: dto.coverImageUrl?.trim(), isFeatured: dto.isFeatured,
-      },
-      include: { agency: true, images: { orderBy: { sortOrder: 'asc' } } },
-    });
+        },
+        include: { agency: true, images: { orderBy: { sortOrder: 'asc' } } },
+      });
+    } catch (error) {
+      if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002') {
+        throw new ConflictException('Já existe um imóvel com este código ou endereço público');
+      }
+      throw error;
+    }
   }
 
   async uploadImage(userId: string, propertyId: string, file: Express.Multer.File) {
@@ -186,6 +245,17 @@ export class PropertiesService {
 
   private slugify(value: string) {
     return value.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
+  }
+
+  private positiveInteger(value: string | undefined, fallback: number) {
+    const parsed = Number(value);
+    return Number.isInteger(parsed) && parsed > 0 ? parsed : fallback;
+  }
+
+  private nonNegativeNumber(value: string | undefined) {
+    if (value === undefined || value.trim() === '') return undefined;
+    const parsed = Number(value);
+    return Number.isFinite(parsed) && parsed >= 0 ? parsed : undefined;
   }
 
   private async assertMembership(userId: string, agencyId: string) {

@@ -33,8 +33,26 @@ export class PropertiesController {
     @Query('purpose') purpose?: PropertyPurpose,
     @Query('type') type?: PropertyType,
     @Query('featured') featured?: string,
+    @Query('q') q?: string,
+    @Query('neighborhood') neighborhood?: string,
+    @Query('minPrice') minPrice?: string,
+    @Query('maxPrice') maxPrice?: string,
+    @Query('page') page?: string,
+    @Query('limit') limit?: string,
   ) {
-    return this.propertiesService.findAll({ city, state, purpose, type, featured: featured === undefined ? undefined : featured === 'true' });
+    return this.propertiesService.findAll({
+      city,
+      state,
+      purpose,
+      type,
+      featured: featured === undefined ? undefined : featured === 'true',
+      q,
+      neighborhood,
+      minPrice,
+      maxPrice,
+      page,
+      limit,
+    });
   }
 
   @Get('mine')
