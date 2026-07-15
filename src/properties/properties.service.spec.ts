@@ -7,7 +7,14 @@ describe('PropertiesService', () => {
       property: {
         findMany: jest.fn().mockResolvedValue(items),
         count: jest.fn().mockResolvedValue(total),
+        findUnique: jest.fn().mockResolvedValue({ id: 'property-1', agencyId: 'agency-1', images: [] }),
+        update: jest.fn().mockResolvedValue({ id: 'property-1' }),
       },
+      propertyImage: {
+        update: jest.fn().mockResolvedValue({}),
+        findMany: jest.fn().mockResolvedValue([]),
+      },
+      agencyMember: { findUnique: jest.fn().mockResolvedValue({ role: 'OWNER' }) },
       $transaction: jest.fn((operations: Promise<unknown>[]) => Promise.all(operations)),
     };
     const service = new PropertiesService(prisma as never, {} as never);
@@ -43,5 +50,29 @@ describe('PropertiesService', () => {
         AND: expect.arrayContaining([{ salePrice: { gte: 100000, lte: 500000 } }]),
       }),
     }));
+  });
+
+  it('archives a property that belongs to the current agency member', async () => {
+    const { prisma, service } = setup();
+
+    await service.changeAvailability('user-1', 'property-1', 'INACTIVE');
+
+    expect(prisma.property.update).toHaveBeenCalledWith(expect.objectContaining({
+      where: { id: 'property-1' },
+      data: { status: 'INACTIVE' },
+    }));
+  });
+
+  it('rejects image orders that do not contain the complete gallery', async () => {
+    const { prisma, service } = setup();
+    prisma.property.findUnique.mockResolvedValue({
+      id: 'property-1',
+      agencyId: 'agency-1',
+      images: [{ id: 'image-1' }, { id: 'image-2' }],
+    });
+
+    await expect(service.reorderImages('user-1', 'property-1', {
+      images: [{ id: 'image-1', sortOrder: 0 }],
+    })).rejects.toThrow('Envie todas as imagens');
   });
 });

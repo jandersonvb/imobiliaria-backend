@@ -1,9 +1,10 @@
-import { ConflictException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, ConflictException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
 import { Prisma, PropertyPurpose, PropertyType } from '@prisma/client';
 import { CloudinaryService } from '../cloudinary/cloudinary.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { AddPropertyImageDto } from './dto/add-property-image.dto';
 import { CreatePropertyDto } from './dto/create-property.dto';
+import { ReorderPropertyImagesDto } from './dto/reorder-property-images.dto';
 import { UpdatePropertyDto } from './dto/update-property.dto';
 
 export type PropertyFilters = {
@@ -180,6 +181,18 @@ export class PropertiesService {
     }
   }
 
+  async changeAvailability(userId: string, id: string, status: 'INACTIVE' | 'AVAILABLE') {
+    const property = await this.prisma.property.findUnique({ where: { id } });
+    if (!property) throw new NotFoundException('Imóvel não encontrado');
+    await this.assertMembership(userId, property.agencyId);
+
+    return this.prisma.property.update({
+      where: { id },
+      data: { status },
+      include: { agency: true, images: { orderBy: { sortOrder: 'asc' } } },
+    });
+  }
+
   async uploadImage(userId: string, propertyId: string, file: Express.Multer.File) {
     const property = await this.prisma.property.findUnique({
       where: { id: propertyId },
@@ -227,6 +240,53 @@ export class PropertiesService {
     return image;
   }
 
+  async setCoverImage(userId: string, propertyId: string, imageId: string) {
+    const image = await this.prisma.propertyImage.findUnique({
+      where: { id: imageId },
+      include: { property: true },
+    });
+    if (!image || image.propertyId !== propertyId) throw new NotFoundException('Imagem não encontrada');
+    await this.assertMembership(userId, image.property.agencyId);
+
+    await this.prisma.$transaction([
+      this.prisma.propertyImage.updateMany({ where: { propertyId }, data: { isCover: false } }),
+      this.prisma.propertyImage.update({ where: { id: imageId }, data: { isCover: true } }),
+      this.prisma.property.update({ where: { id: propertyId }, data: { coverImageUrl: image.url } }),
+    ]);
+
+    return this.prisma.propertyImage.findMany({ where: { propertyId }, orderBy: { sortOrder: 'asc' } });
+  }
+
+  async reorderImages(userId: string, propertyId: string, dto: ReorderPropertyImagesDto) {
+    const property = await this.prisma.property.findUnique({
+      where: { id: propertyId },
+      include: { images: { select: { id: true } } },
+    });
+    if (!property) throw new NotFoundException('Imóvel não encontrado');
+    await this.assertMembership(userId, property.agencyId);
+
+    const currentIds = new Set(property.images.map((image) => image.id));
+    const requestedIds = new Set(dto.images.map((image) => image.id));
+    const positions = new Set(dto.images.map((image) => image.sortOrder));
+    if (
+      requestedIds.size !== property.images.length
+      || dto.images.length !== property.images.length
+      || positions.size !== dto.images.length
+      || dto.images.some((image) => !currentIds.has(image.id))
+    ) {
+      throw new BadRequestException('Envie todas as imagens, sem IDs ou posições duplicadas');
+    }
+
+    await this.prisma.$transaction(
+      dto.images.map((image) => this.prisma.propertyImage.update({
+        where: { id: image.id },
+        data: { sortOrder: image.sortOrder },
+      })),
+    );
+
+    return this.prisma.propertyImage.findMany({ where: { propertyId }, orderBy: { sortOrder: 'asc' } });
+  }
+
   async removeImage(userId: string, propertyId: string, imageId: string) {
     const image = await this.prisma.propertyImage.findUnique({ where: { id: imageId }, include: { property: true } });
     if (!image || image.propertyId !== propertyId) throw new NotFoundException('Imagem não encontrada');
@@ -240,6 +300,21 @@ export class PropertiesService {
       await this.prisma.property.update({ where: { id: propertyId }, data: { coverImageUrl: next?.url ?? null } });
       if (next) await this.prisma.propertyImage.update({ where: { id: next.id }, data: { isCover: true } });
     }
+    return { success: true };
+  }
+
+  async remove(userId: string, id: string) {
+    const property = await this.prisma.property.findUnique({
+      where: { id },
+      include: { images: { select: { publicId: true } } },
+    });
+    if (!property) throw new NotFoundException('Imóvel não encontrado');
+    await this.assertMembership(userId, property.agencyId);
+
+    for (const image of property.images) {
+      if (image.publicId) await this.cloudinary.deleteImage(image.publicId);
+    }
+    await this.prisma.property.delete({ where: { id } });
     return { success: true };
   }
 

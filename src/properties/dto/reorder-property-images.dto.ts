@@ -1,0 +1,19 @@
+import { Type } from 'class-transformer';
+import { ArrayMinSize, IsArray, IsInt, IsString, Min, ValidateNested } from 'class-validator';
+
+export class PropertyImageOrderItemDto {
+  @IsString()
+  id: string;
+
+  @IsInt()
+  @Min(0)
+  sortOrder: number;
+}
+
+export class ReorderPropertyImagesDto {
+  @IsArray()
+  @ArrayMinSize(1)
+  @ValidateNested({ each: true })
+  @Type(() => PropertyImageOrderItemDto)
+  images: PropertyImageOrderItemDto[];
+}

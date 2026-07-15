@@ -19,6 +19,7 @@ import { CurrentUser } from '../auth/current-user.decorator';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { AddPropertyImageDto } from './dto/add-property-image.dto';
 import { CreatePropertyDto } from './dto/create-property.dto';
+import { ReorderPropertyImagesDto } from './dto/reorder-property-images.dto';
 import { UpdatePropertyDto } from './dto/update-property.dto';
 import { PropertiesService } from './properties.service';
 
@@ -79,6 +80,18 @@ export class PropertiesController {
     return this.propertiesService.update(user.sub, id, dto);
   }
 
+  @Patch(':id/archive')
+  @UseGuards(JwtAuthGuard)
+  archive(@CurrentUser() user: { sub: string }, @Param('id') id: string) {
+    return this.propertiesService.changeAvailability(user.sub, id, 'INACTIVE');
+  }
+
+  @Patch(':id/activate')
+  @UseGuards(JwtAuthGuard)
+  activate(@CurrentUser() user: { sub: string }, @Param('id') id: string) {
+    return this.propertiesService.changeAvailability(user.sub, id, 'AVAILABLE');
+  }
+
   @Post(':id/images/upload')
   @UseGuards(JwtAuthGuard)
   @UseInterceptors(FileInterceptor('file', {
@@ -107,6 +120,26 @@ export class PropertiesController {
     return this.propertiesService.addImage(user.sub, id, dto);
   }
 
+  @Patch(':id/images/order')
+  @UseGuards(JwtAuthGuard)
+  reorderImages(
+    @CurrentUser() user: { sub: string },
+    @Param('id') id: string,
+    @Body() dto: ReorderPropertyImagesDto,
+  ) {
+    return this.propertiesService.reorderImages(user.sub, id, dto);
+  }
+
+  @Patch(':id/images/:imageId/cover')
+  @UseGuards(JwtAuthGuard)
+  setCover(
+    @CurrentUser() user: { sub: string },
+    @Param('id') id: string,
+    @Param('imageId') imageId: string,
+  ) {
+    return this.propertiesService.setCoverImage(user.sub, id, imageId);
+  }
+
   @Delete(':id/images/:imageId')
   @UseGuards(JwtAuthGuard)
   removeImage(
@@ -115,6 +148,12 @@ export class PropertiesController {
     @Param('imageId') imageId: string,
   ) {
     return this.propertiesService.removeImage(user.sub, id, imageId);
+  }
+
+  @Delete(':id')
+  @UseGuards(JwtAuthGuard)
+  remove(@CurrentUser() user: { sub: string }, @Param('id') id: string) {
+    return this.propertiesService.remove(user.sub, id);
   }
 
   @Get(':slug')
