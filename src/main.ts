@@ -24,7 +24,17 @@ async function bootstrap() {
     origin: allowedOrigins,
     credentials: true,
     methods: ['GET', 'POST', 'PATCH', 'DELETE', 'OPTIONS'],
-    allowedHeaders: ['Content-Type', 'Authorization'],
+    allowedHeaders: ['Content-Type'],
+  });
+
+  app.use((request: { method: string; headers: { origin?: string } }, response: { status: (code: number) => { json: (body: unknown) => void } }, next: () => void) => {
+    const mutating = ['POST', 'PUT', 'PATCH', 'DELETE'].includes(request.method);
+    const origin = request.headers.origin;
+    if (mutating && origin && !allowedOrigins.includes(origin)) {
+      response.status(403).json({ message: 'Origem não autorizada.' });
+      return;
+    }
+    next();
   });
 
   app.useGlobalPipes(

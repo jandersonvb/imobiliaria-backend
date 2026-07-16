@@ -59,6 +59,23 @@ export class AuthService {
     });
   }
 
+  async getProfile(userId: string) {
+    const user = await this.prisma.user.findUnique({
+      where: { id: userId },
+      select: {
+        id: true,
+        email: true,
+        firstName: true,
+        lastName: true,
+        phone: true,
+        createdAt: true,
+      },
+    });
+
+    if (!user) throw new UnauthorizedException('Sessão inválida.');
+    return { user };
+  }
+
   private async createSession(user: {
     id: string;
     email: string;

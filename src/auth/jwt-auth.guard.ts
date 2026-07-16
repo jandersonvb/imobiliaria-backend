@@ -2,6 +2,7 @@ import { CanActivate, ExecutionContext, Injectable, UnauthorizedException } from
 import { ConfigService } from '@nestjs/config';
 import { JwtService } from '@nestjs/jwt';
 import { Request } from 'express';
+import { getSessionCookieName } from './session-cookie';
 
 export type AuthenticatedRequest = Request & {
   user?: { sub: string; email: string };
@@ -18,7 +19,7 @@ export class JwtAuthGuard implements CanActivate {
     const request = context.switchToHttp().getRequest<AuthenticatedRequest>();
     const token = this.extractToken(request);
 
-    if (!token) throw new UnauthorizedException('Token de acesso não informado');
+    if (!token) throw new UnauthorizedException('Sessão não encontrada');
 
     try {
       request.user = await this.jwtService.verifyAsync<{ sub: string; email: string }>(token, {
@@ -26,12 +27,23 @@ export class JwtAuthGuard implements CanActivate {
       });
       return true;
     } catch {
-      throw new UnauthorizedException('Token de acesso inválido ou expirado');
+      throw new UnauthorizedException('Sessão inválida ou expirada');
     }
   }
 
   private extractToken(request: Request): string | undefined {
-    const [type, token] = request.headers.authorization?.split(' ') ?? [];
-    return type === 'Bearer' ? token : undefined;
+    const cookieName = getSessionCookieName(this.configService);
+    const cookie = request.headers.cookie
+      ?.split(';')
+      .map((item) => item.trim())
+      .find((item) => item.startsWith(`${cookieName}=`));
+    if (!cookie) return undefined;
+
+    const value = cookie.slice(cookieName.length + 1);
+    try {
+      return decodeURIComponent(value);
+    } catch {
+      return undefined;
+    }
   }
 }

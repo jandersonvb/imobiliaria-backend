@@ -9,6 +9,7 @@ API do marketplace e CRM imobiliário, construída com NestJS, Prisma e PostgreS
 - corretores
 - imóveis e mídias
 - leads e funil comercial
+- autenticação em cookie `HttpOnly`, sem exposição do token ao JavaScript
 - visitas e propostas
 - favoritos, chat e planos
 

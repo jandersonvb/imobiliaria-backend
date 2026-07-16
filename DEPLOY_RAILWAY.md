@@ -16,6 +16,8 @@ Configure no serviço do backend:
 DATABASE_URL=${{Postgres.DATABASE_URL}}
 NODE_ENV=production
 JWT_SECRET=gere-uma-chave-longa-e-aleatoria
+SESSION_COOKIE_NAME=imobconnect_session
+SESSION_COOKIE_SAME_SITE=none
 FRONTEND_URL=https://DOMINIO-DO-FRONTEND
 CLOUDINARY_CLOUD_NAME=
 CLOUDINARY_API_KEY=
@@ -40,6 +42,8 @@ NEXT_PUBLIC_API_URL=https://DOMINIO-DO-BACKEND/api
 ```
 
 Depois de gerar o domínio público do frontend, atualize `FRONTEND_URL` no backend e faça um redeploy.
+
+Enquanto frontend e backend estiverem em domínios Railway diferentes, use `SESSION_COOKIE_SAME_SITE=none`. Quando ambos estiverem em subdomínios do domínio próprio, como `www.exemplo.com.br` e `api.exemplo.com.br`, prefira `lax`.
 
 ## Ordem sugerida
 
