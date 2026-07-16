@@ -153,6 +153,7 @@ model Lead {
   message    String?
   notes      String?
   stage      LeadStage @default(NEW)
+  consentAt  DateTime  @default(now())
   agency     Agency    @relation(fields: [agencyId], references: [id], onDelete: Cascade)
   property   Property? @relation(fields: [propertyId], references: [id], onDelete: SetNull)
   customer   User?     @relation(fields: [customerId], references: [id], onDelete: SetNull)

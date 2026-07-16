@@ -14,6 +14,7 @@ Configure no serviço do backend:
 
 ```env
 DATABASE_URL=${{Postgres.DATABASE_URL}}
+NODE_ENV=production
 JWT_SECRET=gere-uma-chave-longa-e-aleatoria
 FRONTEND_URL=https://DOMINIO-DO-FRONTEND
 CLOUDINARY_CLOUD_NAME=
@@ -49,3 +50,15 @@ Depois de gerar o domínio público do frontend, atualize `FRONTEND_URL` no back
 5. Gerar domínio público do frontend.
 6. Atualizar `FRONTEND_URL` no backend.
 7. Testar `/api/health`, cadastro, login, criação de imobiliária e upload.
+
+## Checklist antes de liberar o domínio
+
+- gere `JWT_SECRET` aleatório com pelo menos 32 caracteres e nunca o reutilize em outro sistema;
+- ative backups automáticos e retenção no PostgreSQL;
+- configure alertas de indisponibilidade para `/api/health` e `/health`;
+- confirme que `FRONTEND_URL` possui somente domínios HTTPS autorizados;
+- limite o acesso administrativo ao projeto Railway e à conta Cloudinary;
+- revise os logs após cada deploy e mantenha um procedimento de rollback para o commit anterior;
+- publique termos de uso e política de privacidade antes de receber dados de clientes reais.
+
+O backend interrompe a inicialização em produção quando banco, JWT, frontend ou Cloudinary não estiverem configurados corretamente.
