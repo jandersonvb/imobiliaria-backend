@@ -5,8 +5,10 @@ import { LeadsService } from './leads.service';
 describe('LeadsService', () => {
   const prisma = {
     property: { findFirst: jest.fn() },
-    lead: { findFirst: jest.fn(), create: jest.fn(), findMany: jest.fn(), count: jest.fn() },
+    lead: { findFirst: jest.fn(), findUnique: jest.fn(), create: jest.fn(), findMany: jest.fn(), count: jest.fn(), groupBy: jest.fn() },
     agencyMember: { findUnique: jest.fn() },
+    leadActivity: { count: jest.fn(), create: jest.fn() },
+    propertyVisit: { count: jest.fn() },
     $transaction: jest.fn(),
   };
   const service = new LeadsService(prisma as never);
@@ -49,5 +51,25 @@ describe('LeadsService', () => {
     prisma.$transaction.mockResolvedValue([[{ id: 'lead' }], 21]);
     await expect(service.findMine('user', { stage: 'NEW', search: 'Maria', page: 2, limit: 20 }))
       .resolves.toEqual({ items: [{ id: 'lead' }], pagination: { page: 2, limit: 20, total: 21, totalPages: 2 } });
+  });
+
+  it('creates a task only when the user belongs to the lead agency', async () => {
+    prisma.lead.findUnique.mockResolvedValue({ id: 'lead', agencyId: 'agency', stage: 'NEW', assignedMemberId: null, assignedUserId: null });
+    prisma.agencyMember.findUnique.mockResolvedValue({ role: 'BROKER' });
+    prisma.leadActivity.create.mockResolvedValue({ id: 'activity', title: 'Retornar contato' });
+    await expect(service.addActivity('user', 'lead', { type: 'TASK', title: ' Retornar contato ' }))
+      .resolves.toMatchObject({ id: 'activity' });
+    expect(prisma.leadActivity.create).toHaveBeenCalledWith(expect.objectContaining({
+      data: expect.objectContaining({ agencyId: 'agency', leadId: 'lead', userId: 'user', title: 'Retornar contato' }),
+    }));
+  });
+
+  it('calculates commercial dashboard metrics', async () => {
+    prisma.agencyMember.findMany = jest.fn().mockResolvedValue([{ agencyId: 'agency' }]);
+    prisma.lead.count.mockResolvedValueOnce(20).mockResolvedValueOnce(5).mockResolvedValueOnce(4);
+    prisma.leadActivity.count.mockResolvedValue(3);
+    prisma.propertyVisit.count.mockResolvedValue(2);
+    prisma.lead.groupBy.mockResolvedValue([{ stage: 'NEW', _count: { _all: 6 } }]);
+    await expect(service.metrics('user')).resolves.toMatchObject({ total: 20, newThisMonth: 5, won: 4, conversionRate: 20, pendingActivities: 3, upcomingVisits: 2, byStage: { NEW: 6 } });
   });
 });

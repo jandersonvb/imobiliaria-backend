@@ -54,75 +54,135 @@ enum LeadStage {
   LOST
 }
 
+enum AgencyInvitationStatus {
+  PENDING
+  ACCEPTED
+  REVOKED
+  EXPIRED
+}
+
+enum LeadActivityType {
+  NOTE
+  CALL
+  EMAIL
+  WHATSAPP
+  TASK
+  REMINDER
+}
+
+enum LeadActivityStatus {
+  PENDING
+  COMPLETED
+  CANCELED
+}
+
+enum VisitStatus {
+  SCHEDULED
+  CONFIRMED
+  COMPLETED
+  CANCELED
+  NO_SHOW
+}
+
 model User {
-  id           String         @id @default(cuid())
-  email        String         @unique
-  passwordHash String
-  firstName    String
-  lastName     String
-  phone        String?
-  memberships  AgencyMember[]
-  leads        Lead[]
-  createdAt    DateTime       @default(now())
-  updatedAt    DateTime       @updatedAt
+  id                 String             @id @default(cuid())
+  email              String             @unique
+  passwordHash       String
+  firstName          String
+  lastName           String
+  phone              String?
+  memberships        AgencyMember[]
+  leads              Lead[]
+  assignedLeads      Lead[]             @relation("LeadAssignee")
+  invitationsCreated AgencyInvitation[] @relation("InvitationCreator")
+  leadActivities     LeadActivity[]
+  leadHistory        LeadHistory[]
+  visitsCreated      PropertyVisit[]    @relation("VisitCreator")
+  visitsAssigned     PropertyVisit[]    @relation("VisitAssignee")
+  createdAt          DateTime           @default(now())
+  updatedAt          DateTime           @updatedAt
 }
 
 model Agency {
-  id          String         @id @default(cuid())
-  name        String
-  slug        String         @unique
-  creci       String?
-  phone       String?
-  email       String?
-  description String?
-  city        String?
-  state       String?
-  members     AgencyMember[]
-  properties  Property[]
-  leads       Lead[]
-  createdAt   DateTime       @default(now())
-  updatedAt   DateTime       @updatedAt
+  id             String             @id @default(cuid())
+  name           String
+  slug           String             @unique
+  creci          String?
+  phone          String?
+  email          String?
+  description    String?
+  city           String?
+  state          String?
+  members        AgencyMember[]
+  properties     Property[]
+  leads          Lead[]
+  invitations    AgencyInvitation[]
+  leadActivities LeadActivity[]
+  visits         PropertyVisit[]
+  createdAt      DateTime           @default(now())
+  updatedAt      DateTime           @updatedAt
 }
 
 model AgencyMember {
-  id       String           @id @default(cuid())
-  agencyId String
-  userId   String
-  role     AgencyMemberRole
-  agency   Agency           @relation(fields: [agencyId], references: [id], onDelete: Cascade)
-  user     User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+  id             String           @id @default(cuid())
+  agencyId       String
+  userId         String
+  role           AgencyMemberRole
+  agency         Agency           @relation(fields: [agencyId], references: [id], onDelete: Cascade)
+  user           User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+  assignedLeads  Lead[]           @relation("AssignedMember")
+  assignedVisits PropertyVisit[]
 
   @@unique([agencyId, userId])
 }
 
+model AgencyInvitation {
+  id          String                 @id @default(cuid())
+  agencyId    String
+  email       String
+  role        AgencyMemberRole
+  token       String                 @unique
+  status      AgencyInvitationStatus @default(PENDING)
+  expiresAt   DateTime
+  invitedById String
+  agency      Agency                 @relation(fields: [agencyId], references: [id], onDelete: Cascade)
+  invitedBy   User                   @relation("InvitationCreator", fields: [invitedById], references: [id], onDelete: Cascade)
+  createdAt   DateTime               @default(now())
+  updatedAt   DateTime               @updatedAt
+
+  @@index([agencyId, status])
+  @@index([email, status])
+}
+
 model Property {
-  id               String          @id @default(cuid())
-  agencyId         String
-  code             String
-  slug             String          @unique
-  title            String
-  description      String
-  purpose          PropertyPurpose
-  type             PropertyType
-  status           PropertyStatus  @default(DRAFT)
-  salePrice        Decimal?        @db.Decimal(14, 2)
-  rentPrice        Decimal?        @db.Decimal(14, 2)
-  bedrooms         Int?
-  bathrooms        Int?
-  parkingSpaces    Int?
-  totalArea        Decimal?        @db.Decimal(10, 2)
-  neighborhood     String
-  city             String
-  state            String
-  latitude         Float?
-  longitude        Float?
-  coverImageUrl    String?
-  isFeatured       Boolean         @default(false)
-  agency           Agency          @relation(fields: [agencyId], references: [id], onDelete: Cascade)
-  leads            Lead[]
-  images           PropertyImage[]
-  createdAt        DateTime        @default(now())
-  updatedAt        DateTime        @updatedAt
+  id            String          @id @default(cuid())
+  agencyId      String
+  code          String
+  slug          String          @unique
+  title         String
+  description   String
+  purpose       PropertyPurpose
+  type          PropertyType
+  status        PropertyStatus  @default(DRAFT)
+  salePrice     Decimal?        @db.Decimal(14, 2)
+  rentPrice     Decimal?        @db.Decimal(14, 2)
+  bedrooms      Int?
+  bathrooms     Int?
+  parkingSpaces Int?
+  totalArea     Decimal?        @db.Decimal(10, 2)
+  neighborhood  String
+  city          String
+  state         String
+  latitude      Float?
+  longitude     Float?
+  coverImageUrl String?
+  isFeatured    Boolean         @default(false)
+  agency        Agency          @relation(fields: [agencyId], references: [id], onDelete: Cascade)
+  leads         Lead[]
+  images        PropertyImage[]
+  visits        PropertyVisit[]
+  createdAt     DateTime        @default(now())
+  updatedAt     DateTime        @updatedAt
 
   @@unique([agencyId, code])
   @@index([city, state])
@@ -143,23 +203,93 @@ model PropertyImage {
 }
 
 model Lead {
-  id         String    @id @default(cuid())
-  agencyId   String
-  propertyId String?
-  customerId String?
-  name       String
-  email      String?
-  phone      String?
-  message    String?
-  notes      String?
-  stage      LeadStage @default(NEW)
-  consentAt  DateTime  @default(now())
-  agency     Agency    @relation(fields: [agencyId], references: [id], onDelete: Cascade)
-  property   Property? @relation(fields: [propertyId], references: [id], onDelete: SetNull)
-  customer   User?     @relation(fields: [customerId], references: [id], onDelete: SetNull)
-  createdAt  DateTime  @default(now())
-  updatedAt  DateTime  @updatedAt
+  id               String          @id @default(cuid())
+  agencyId         String
+  propertyId       String?
+  customerId       String?
+  name             String
+  email            String?
+  phone            String?
+  message          String?
+  notes            String?
+  assignedMemberId String?
+  assignedUserId   String?
+  stage            LeadStage       @default(NEW)
+  consentAt        DateTime        @default(now())
+  agency           Agency          @relation(fields: [agencyId], references: [id], onDelete: Cascade)
+  property         Property?       @relation(fields: [propertyId], references: [id], onDelete: SetNull)
+  customer         User?           @relation(fields: [customerId], references: [id], onDelete: SetNull)
+  assignedMember   AgencyMember?   @relation("AssignedMember", fields: [assignedMemberId], references: [id], onDelete: SetNull)
+  assignedUser     User?           @relation("LeadAssignee", fields: [assignedUserId], references: [id], onDelete: SetNull)
+  activities       LeadActivity[]
+  history          LeadHistory[]
+  visits           PropertyVisit[]
+  createdAt        DateTime        @default(now())
+  updatedAt        DateTime        @updatedAt
 
   @@index([agencyId, stage])
   @@index([propertyId])
+  @@index([assignedMemberId])
+  @@index([assignedUserId])
+}
+
+model LeadHistory {
+  id        String   @id @default(cuid())
+  leadId    String
+  userId    String
+  field     String
+  fromValue String?
+  toValue   String?
+  lead      Lead     @relation(fields: [leadId], references: [id], onDelete: Cascade)
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  createdAt DateTime @default(now())
+
+  @@index([leadId, createdAt])
+}
+
+model LeadActivity {
+  id          String             @id @default(cuid())
+  agencyId    String
+  leadId      String
+  userId      String
+  type        LeadActivityType
+  status      LeadActivityStatus @default(PENDING)
+  title       String
+  description String?
+  dueAt       DateTime?
+  completedAt DateTime?
+  agency      Agency             @relation(fields: [agencyId], references: [id], onDelete: Cascade)
+  lead        Lead               @relation(fields: [leadId], references: [id], onDelete: Cascade)
+  user        User               @relation(fields: [userId], references: [id], onDelete: Cascade)
+  createdAt   DateTime           @default(now())
+  updatedAt   DateTime           @updatedAt
+
+  @@index([leadId, createdAt])
+  @@index([agencyId, status, dueAt])
+}
+
+model PropertyVisit {
+  id               String        @id @default(cuid())
+  agencyId         String
+  leadId           String
+  propertyId       String
+  assignedMemberId String?
+  createdById      String
+  assignedUserId   String?
+  scheduledAt      DateTime
+  durationMinutes  Int           @default(60)
+  status           VisitStatus   @default(SCHEDULED)
+  notes            String?
+  agency           Agency        @relation(fields: [agencyId], references: [id], onDelete: Cascade)
+  lead             Lead          @relation(fields: [leadId], references: [id], onDelete: Cascade)
+  property         Property      @relation(fields: [propertyId], references: [id], onDelete: Cascade)
+  assignedMember   AgencyMember? @relation(fields: [assignedMemberId], references: [id], onDelete: SetNull)
+  createdBy        User          @relation("VisitCreator", fields: [createdById], references: [id], onDelete: Cascade)
+  assignedUser     User?         @relation("VisitAssignee", fields: [assignedUserId], references: [id], onDelete: SetNull)
+  createdAt        DateTime      @default(now())
+  updatedAt        DateTime      @updatedAt
+
+  @@index([agencyId, scheduledAt])
+  @@index([leadId])
+  @@index([assignedMemberId, scheduledAt])
 }
