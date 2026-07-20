@@ -3,6 +3,10 @@ import { Transform, Type } from 'class-transformer';
 import { IsEnum, IsInt, IsOptional, IsString, Max, MaxLength, Min } from 'class-validator';
 
 export class FindLeadsDto {
+  @IsString()
+  @MaxLength(64)
+  agencyId: string;
+
   @IsOptional()
   @IsEnum(LeadStage)
   stage?: LeadStage;

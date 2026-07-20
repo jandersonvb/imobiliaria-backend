@@ -36,8 +36,8 @@ export class LeadsController {
 
   @Get('mine/metrics')
   @UseGuards(JwtAuthGuard)
-  metrics(@CurrentUser() user: { sub: string }) {
-    return this.leadsService.metrics(user.sub);
+  metrics(@CurrentUser() user: { sub: string }, @Query('agencyId') agencyId: string) {
+    return this.leadsService.metrics(user.sub, agencyId);
   }
 
   @Get(':id')

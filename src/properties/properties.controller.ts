@@ -58,8 +58,8 @@ export class PropertiesController {
 
   @Get('mine')
   @UseGuards(JwtAuthGuard)
-  findMine(@CurrentUser() user: { sub: string }) {
-    return this.propertiesService.findMine(user.sub);
+  findMine(@CurrentUser() user: { sub: string }, @Query('agencyId') agencyId: string) {
+    return this.propertiesService.findMine(user.sub, agencyId);
   }
 
   @Get('mine/:id')

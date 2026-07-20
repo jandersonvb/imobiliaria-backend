@@ -56,8 +56,10 @@ export class LeadsService {
   }
 
   async findMine(userId: string, query: FindLeadsDto) {
+    const membership = await this.requireAgencyMembership(userId, query.agencyId);
     const where: Prisma.LeadWhereInput = {
-      agency: { members: { some: { userId } } },
+      agencyId: query.agencyId,
+      ...this.leadVisibility(membership.role, userId),
       ...(query.stage ? { stage: query.stage } : {}),
       ...(query.propertyId ? { propertyId: query.propertyId } : {}),
       ...(query.search ? {
@@ -105,11 +107,7 @@ export class LeadsService {
 
     if (!lead) throw new NotFoundException('Lead não encontrado');
 
-    const membership = await this.prisma.agencyMember.findUnique({
-      where: { agencyId_userId: { agencyId: lead.agencyId, userId } },
-    });
-
-    if (!membership) throw new ForbiddenException('Você não possui acesso a este lead');
+    await this.assertLeadAccess(userId, id, 'write');
 
     return this.prisma.$transaction(async (tx) => {
       const changes = [
@@ -123,13 +121,19 @@ export class LeadsService {
   }
 
   async findOne(userId: string, id: string) {
-    await this.assertLeadAccess(userId, id);
-    return this.prisma.lead.findUnique({ where: { id }, include: this.detailInclude() });
+    const { membership } = await this.assertLeadAccess(userId, id);
+    const lead = await this.prisma.lead.findUnique({ where: { id }, include: this.detailInclude() });
+    return {
+      ...lead,
+      permissions: {
+        canEdit: membership.role !== 'ASSISTANT',
+        canAssign: ['OWNER', 'MANAGER'].includes(membership.role),
+      },
+    };
   }
 
   async assign(userId: string, id: string, dto: AssignLeadDto) {
-    const { lead, membership } = await this.assertLeadAccess(userId, id);
-    if (!['OWNER', 'MANAGER'].includes(membership.role) && lead.assignedUserId !== userId) throw new ForbiddenException('Você não pode redistribuir este lead');
+    const { lead } = await this.assertLeadAccess(userId, id, 'assign');
     const member = dto.memberId ? await this.prisma.agencyMember.findFirst({ where: { id: dto.memberId, agencyId: lead.agencyId }, include: { user: true } }) : null;
     if (dto.memberId && !member) throw new NotFoundException('Corretor não encontrado');
     return this.prisma.$transaction(async (tx) => {
@@ -140,19 +144,19 @@ export class LeadsService {
   }
 
   async addActivity(userId: string, id: string, dto: CreateLeadActivityDto) {
-    const { lead } = await this.assertLeadAccess(userId, id);
+    const { lead } = await this.assertLeadAccess(userId, id, 'write');
     return this.prisma.leadActivity.create({ data: { agencyId: lead.agencyId, leadId: id, userId, type: dto.type, title: dto.title.trim(), description: dto.description?.trim(), dueAt: dto.dueAt }, include: { user: { select: { firstName: true, lastName: true } } } });
   }
 
   async updateActivity(userId: string, leadId: string, activityId: string, dto: UpdateLeadActivityDto) {
-    await this.assertLeadAccess(userId, leadId);
+    await this.assertLeadAccess(userId, leadId, 'write');
     const activity = await this.prisma.leadActivity.findFirst({ where: { id: activityId, leadId } });
     if (!activity) throw new NotFoundException('Atividade não encontrada');
     return this.prisma.leadActivity.update({ where: { id: activityId }, data: { status: dto.status, completedAt: dto.status === 'COMPLETED' ? new Date() : null } });
   }
 
   async addVisit(userId: string, id: string, dto: CreatePropertyVisitDto) {
-    const { lead } = await this.assertLeadAccess(userId, id);
+    const { lead } = await this.assertLeadAccess(userId, id, 'write');
     const property = await this.prisma.property.findFirst({ where: { id: dto.propertyId, agencyId: lead.agencyId } });
     if (!property) throw new NotFoundException('Imóvel não encontrado nesta imobiliária');
     const member = dto.assignedMemberId ? await this.prisma.agencyMember.findFirst({ where: { id: dto.assignedMemberId, agencyId: lead.agencyId } }) : null;
@@ -170,24 +174,35 @@ export class LeadsService {
   }
 
   async updateVisit(userId: string, leadId: string, visitId: string, dto: UpdatePropertyVisitDto) {
-    await this.assertLeadAccess(userId, leadId);
+    await this.assertLeadAccess(userId, leadId, 'write');
     const visit = await this.prisma.propertyVisit.findFirst({ where: { id: visitId, leadId } });
     if (!visit) throw new NotFoundException('Visita não encontrada');
     return this.prisma.propertyVisit.update({ where: { id: visitId }, data: { status: dto.status, scheduledAt: dto.scheduledAt, notes: dto.notes?.trim() } });
   }
 
-  async metrics(userId: string) {
-    const memberships = await this.prisma.agencyMember.findMany({ where: { userId }, select: { agencyId: true } });
-    const agencyIds = memberships.map((item) => item.agencyId);
+  async metrics(userId: string, agencyId: string) {
+    const membership = await this.requireAgencyMembership(userId, agencyId);
+    const leadWhere: Prisma.LeadWhereInput = {
+      agencyId,
+      ...this.leadVisibility(membership.role, userId),
+    };
+    const activityWhere: Prisma.LeadActivityWhereInput = {
+      agencyId,
+      ...(membership.role === 'BROKER' ? { lead: { assignedUserId: userId } } : {}),
+    };
+    const visitWhere: Prisma.PropertyVisitWhereInput = {
+      agencyId,
+      ...(membership.role === 'BROKER' ? { assignedUserId: userId } : {}),
+    };
     const now = new Date();
     const start = new Date(now.getFullYear(), now.getMonth(), 1);
     const [total, newLeads, won, pendingActivities, upcomingVisits, byStage] = await Promise.all([
-      this.prisma.lead.count({ where: { agencyId: { in: agencyIds } } }),
-      this.prisma.lead.count({ where: { agencyId: { in: agencyIds }, createdAt: { gte: start } } }),
-      this.prisma.lead.count({ where: { agencyId: { in: agencyIds }, stage: 'WON' } }),
-      this.prisma.leadActivity.count({ where: { agencyId: { in: agencyIds }, status: 'PENDING' } }),
-      this.prisma.propertyVisit.count({ where: { agencyId: { in: agencyIds }, scheduledAt: { gte: now }, status: { in: ['SCHEDULED', 'CONFIRMED'] } } }),
-      this.prisma.lead.groupBy({ by: ['stage'], where: { agencyId: { in: agencyIds } }, _count: { _all: true } }),
+      this.prisma.lead.count({ where: leadWhere }),
+      this.prisma.lead.count({ where: { ...leadWhere, createdAt: { gte: start } } }),
+      this.prisma.lead.count({ where: { ...leadWhere, stage: 'WON' } }),
+      this.prisma.leadActivity.count({ where: { ...activityWhere, status: 'PENDING' } }),
+      this.prisma.propertyVisit.count({ where: { ...visitWhere, scheduledAt: { gte: now }, status: { in: ['SCHEDULED', 'CONFIRMED'] } } }),
+      this.prisma.lead.groupBy({ by: ['stage'], where: leadWhere, _count: { _all: true } }),
     ]);
     return { total, newThisMonth: newLeads, won, conversionRate: total ? Math.round((won / total) * 1000) / 10 : 0, pendingActivities, upcomingVisits, byStage: Object.fromEntries(byStage.map((item) => [item.stage, item._count._all])) };
   }
@@ -203,11 +218,32 @@ export class LeadsService {
     };
   }
 
-  private async assertLeadAccess(userId: string, id: string) {
+  private async assertLeadAccess(userId: string, id: string, action: 'read' | 'write' | 'assign' = 'read') {
     const lead = await this.prisma.lead.findUnique({ where: { id }, select: { id: true, agencyId: true, stage: true, assignedMemberId: true, assignedUserId: true } });
     if (!lead) throw new NotFoundException('Lead não encontrado');
-    const membership = await this.prisma.agencyMember.findUnique({ where: { agencyId_userId: { agencyId: lead.agencyId, userId } } });
-    if (!membership) throw new ForbiddenException('Você não possui acesso a este lead');
+    const membership = await this.requireAgencyMembership(userId, lead.agencyId);
+    if (action === 'assign' && !['OWNER', 'MANAGER'].includes(membership.role)) {
+      throw new ForbiddenException('Apenas proprietário ou gerente pode distribuir leads');
+    }
+    if (action === 'write' && membership.role === 'ASSISTANT') {
+      throw new ForbiddenException('Assistentes podem consultar, mas não alterar leads');
+    }
+    if (membership.role === 'BROKER' && lead.assignedUserId !== userId) {
+      throw new ForbiddenException('Este lead não está atribuído a você');
+    }
     return { lead, membership };
+  }
+
+  private async requireAgencyMembership(userId: string, agencyId: string) {
+    if (!agencyId) throw new BadRequestException('Informe a imobiliária');
+    const membership = await this.prisma.agencyMember.findUnique({
+      where: { agencyId_userId: { agencyId, userId } },
+    });
+    if (!membership) throw new ForbiddenException('Você não possui acesso a esta imobiliária');
+    return membership;
+  }
+
+  private leadVisibility(role: string, userId: string): Prisma.LeadWhereInput {
+    return role === 'BROKER' ? { assignedUserId: userId } : {};
   }
 }

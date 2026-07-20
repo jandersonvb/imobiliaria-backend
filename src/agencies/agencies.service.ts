@@ -58,19 +58,19 @@ export class AgenciesService {
   }
 
   async listMembers(userId: string, agencyId: string) {
-    await this.membership(userId, agencyId);
-    const [members, invitations] = await Promise.all([
-      this.prisma.agencyMember.findMany({
-        where: { agencyId },
-        include: { user: { select: { id: true, firstName: true, lastName: true, email: true, phone: true } } },
-        orderBy: [{ role: 'asc' }, { user: { firstName: 'asc' } }],
-      }),
-      this.prisma.agencyInvitation.findMany({
+    const requester = await this.membership(userId, agencyId);
+    const members = await this.prisma.agencyMember.findMany({
+      where: { agencyId },
+      include: { user: { select: { id: true, firstName: true, lastName: true, email: true, phone: true } } },
+      orderBy: [{ role: 'asc' }, { user: { firstName: 'asc' } }],
+    });
+    const invitations = ['OWNER', 'MANAGER'].includes(requester.role)
+      ? await this.prisma.agencyInvitation.findMany({
         where: { agencyId, status: 'PENDING', expiresAt: { gt: new Date() } },
         select: { id: true, email: true, role: true, expiresAt: true, createdAt: true, token: true },
         orderBy: { createdAt: 'desc' },
-      }),
-    ]);
+      })
+      : [];
     return { members, invitations };
   }
 
@@ -121,7 +121,17 @@ export class AgenciesService {
     const member = await this.prisma.agencyMember.findFirst({ where: { id: memberId, agencyId } });
     if (!member) throw new NotFoundException('Membro não encontrado');
     if (member.role === 'OWNER') throw new ForbiddenException('O proprietário não pode ser removido');
-    await this.prisma.agencyMember.delete({ where: { id: memberId } });
+    await this.prisma.$transaction([
+      this.prisma.lead.updateMany({
+        where: { agencyId, assignedMemberId: memberId },
+        data: { assignedMemberId: null, assignedUserId: null },
+      }),
+      this.prisma.propertyVisit.updateMany({
+        where: { agencyId, assignedMemberId: memberId },
+        data: { assignedMemberId: null, assignedUserId: null },
+      }),
+      this.prisma.agencyMember.delete({ where: { id: memberId } }),
+    ]);
     return { success: true };
   }
 

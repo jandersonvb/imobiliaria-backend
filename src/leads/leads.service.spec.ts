@@ -1,5 +1,5 @@
 // @ts-nocheck -- Jest globals are provided at runtime by the existing test dependency.
-import { BadRequestException, ConflictException, NotFoundException } from '@nestjs/common';
+import { BadRequestException, ConflictException, ForbiddenException, NotFoundException } from '@nestjs/common';
 import { LeadsService } from './leads.service';
 
 describe('LeadsService', () => {
@@ -48,13 +48,17 @@ describe('LeadsService', () => {
   });
 
   it('returns filtered leads with pagination metadata', async () => {
+    prisma.agencyMember.findUnique.mockResolvedValue({ role: 'MANAGER' });
     prisma.$transaction.mockResolvedValue([[{ id: 'lead' }], 21]);
-    await expect(service.findMine('user', { stage: 'NEW', search: 'Maria', page: 2, limit: 20 }))
+    await expect(service.findMine('user', { agencyId: 'agency', stage: 'NEW', search: 'Maria', page: 2, limit: 20 }))
       .resolves.toEqual({ items: [{ id: 'lead' }], pagination: { page: 2, limit: 20, total: 21, totalPages: 2 } });
+    expect(prisma.lead.findMany).toHaveBeenCalledWith(expect.objectContaining({
+      where: expect.objectContaining({ agencyId: 'agency' }),
+    }));
   });
 
-  it('creates a task only when the user belongs to the lead agency', async () => {
-    prisma.lead.findUnique.mockResolvedValue({ id: 'lead', agencyId: 'agency', stage: 'NEW', assignedMemberId: null, assignedUserId: null });
+  it('creates a task only when the broker owns the lead', async () => {
+    prisma.lead.findUnique.mockResolvedValue({ id: 'lead', agencyId: 'agency', stage: 'NEW', assignedMemberId: 'member', assignedUserId: 'user' });
     prisma.agencyMember.findUnique.mockResolvedValue({ role: 'BROKER' });
     prisma.leadActivity.create.mockResolvedValue({ id: 'activity', title: 'Retornar contato' });
     await expect(service.addActivity('user', 'lead', { type: 'TASK', title: ' Retornar contato ' }))
@@ -64,12 +68,25 @@ describe('LeadsService', () => {
     }));
   });
 
+  it('prevents brokers from opening another broker lead', async () => {
+    prisma.lead.findUnique.mockResolvedValue({ id: 'lead', agencyId: 'agency', stage: 'NEW', assignedMemberId: 'other-member', assignedUserId: 'other-user' });
+    prisma.agencyMember.findUnique.mockResolvedValue({ role: 'BROKER' });
+    await expect(service.findOne('user', 'lead')).rejects.toBeInstanceOf(ForbiddenException);
+  });
+
+  it('keeps assistants read-only in the CRM', async () => {
+    prisma.lead.findUnique.mockResolvedValue({ id: 'lead', agencyId: 'agency', stage: 'NEW', assignedMemberId: null, assignedUserId: null });
+    prisma.agencyMember.findUnique.mockResolvedValue({ role: 'ASSISTANT' });
+    await expect(service.addActivity('assistant', 'lead', { type: 'TASK', title: 'Tarefa' }))
+      .rejects.toBeInstanceOf(ForbiddenException);
+  });
+
   it('calculates commercial dashboard metrics', async () => {
-    prisma.agencyMember.findMany = jest.fn().mockResolvedValue([{ agencyId: 'agency' }]);
+    prisma.agencyMember.findUnique.mockResolvedValue({ role: 'MANAGER' });
     prisma.lead.count.mockResolvedValueOnce(20).mockResolvedValueOnce(5).mockResolvedValueOnce(4);
     prisma.leadActivity.count.mockResolvedValue(3);
     prisma.propertyVisit.count.mockResolvedValue(2);
     prisma.lead.groupBy.mockResolvedValue([{ stage: 'NEW', _count: { _all: 6 } }]);
-    await expect(service.metrics('user')).resolves.toMatchObject({ total: 20, newThisMonth: 5, won: 4, conversionRate: 20, pendingActivities: 3, upcomingVisits: 2, byStage: { NEW: 6 } });
+    await expect(service.metrics('user', 'agency')).resolves.toMatchObject({ total: 20, newThisMonth: 5, won: 4, conversionRate: 20, pendingActivities: 3, upcomingVisits: 2, byStage: { NEW: 6 } });
   });
 });

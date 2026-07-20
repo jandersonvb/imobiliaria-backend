@@ -132,9 +132,11 @@ export class PropertiesService {
     }
   }
 
-  findMine(userId: string) {
+  async findMine(userId: string, agencyId: string) {
+    if (!agencyId) throw new BadRequestException('Informe a imobiliária');
+    await this.assertMembership(userId, agencyId);
     return this.prisma.property.findMany({
-      where: { agency: { members: { some: { userId } } } },
+      where: { agencyId },
       include: {
         agency: { select: { id: true, name: true, slug: true } },
         images: { orderBy: { sortOrder: 'asc' } },

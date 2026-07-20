@@ -4,8 +4,8 @@ import { AgenciesService } from './agencies.service';
 
 describe('AgenciesService team management', () => {
   const prisma = {
-    agencyMember: { findUnique: jest.fn() },
-    agencyInvitation: { updateMany: jest.fn(), create: jest.fn(), findUnique: jest.fn(), update: jest.fn() },
+    agencyMember: { findUnique: jest.fn(), findMany: jest.fn() },
+    agencyInvitation: { updateMany: jest.fn(), create: jest.fn(), findUnique: jest.fn(), findMany: jest.fn(), update: jest.fn() },
     user: { findUnique: jest.fn() },
     $transaction: jest.fn(),
   };
@@ -27,6 +27,16 @@ describe('AgenciesService team management', () => {
     prisma.agencyMember.findUnique.mockResolvedValue({ role: 'ASSISTANT' });
     await expect(service.inviteMember('assistant', 'agency', { email: 'broker@example.com', role: 'BROKER' }))
       .rejects.toBeInstanceOf(ForbiddenException);
+  });
+
+  it('does not expose invitation tokens to non-managers', async () => {
+    prisma.agencyMember.findUnique.mockResolvedValue({ role: 'BROKER' });
+    prisma.agencyMember.findMany.mockResolvedValue([]);
+    await expect(service.listMembers('broker', 'agency')).resolves.toEqual({
+      members: [],
+      invitations: [],
+    });
+    expect(prisma.agencyInvitation.findMany).not.toHaveBeenCalled();
   });
 
   it('does not allow inviting another owner', async () => {
